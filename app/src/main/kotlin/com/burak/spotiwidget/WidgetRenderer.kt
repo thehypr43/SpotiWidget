@@ -12,9 +12,12 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.PlaybackState
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.SizeF
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
@@ -30,6 +33,17 @@ object WidgetRenderer {
     private var cachedTrackArt: Bitmap? = null
     private var loadingUri: String? = null
     private var lastPersistedKey: String? = null
+
+    // optimistic play/pause state: set by the provider on user toggle, wins over the real
+    // (possibly flickering) MediaSession state until it catches up or the window expires.
+    private var pendingPlaying: Boolean? = null
+    private var pendingUntil: Long = 0L
+
+    fun setPendingPlaying(ctx: Context, playing: Boolean) {
+        pendingPlaying = playing
+        pendingUntil = SystemClock.elapsedRealtime() + 1200
+        update(ctx)
+    }
 
     // idle art cache: loaded from disk once, invalidated by SpotifyListenerService when ctx changes.
     private var idleCtxLoaded = false
@@ -54,7 +68,17 @@ object WidgetRenderer {
         return pos
     }
 
-    fun scaleArtMax(bmp: Bitmap, max: Int = 160): Bitmap {
+    /** Real portrait (smallest-width) height for the widget, so the square art column matches actual height. */
+    private fun portraitHeightDp(opts: Bundle): Int {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val sizes = opts.getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
+            val portrait = sizes?.minByOrNull { it.width }
+            if (portrait != null && portrait.height > 0) return portrait.height.toInt()
+        }
+        return opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0).takeIf { it > 0 } ?: 72
+    }
+
+    fun scaleArtMax(bmp: Bitmap, max: Int = 240): Bitmap {
         val w = bmp.width
         val h = bmp.height
         if (w <= max && h <= max) return bmp
@@ -64,7 +88,7 @@ object WidgetRenderer {
         return Bitmap.createScaledBitmap(bmp, nw, nh, true)
     }
 
-    fun update(ctx: Context, forcePlaying: Boolean? = null) {
+    fun update(ctx: Context) {
         try {
             val mgr = AppWidgetManager.getInstance(ctx)
             val ids = mgr.getAppWidgetIds(ComponentName(ctx, WidgetProvider::class.java))
@@ -78,7 +102,13 @@ object WidgetRenderer {
                 state == PlaybackState.STATE_BUFFERING ||
                 (state == PlaybackState.STATE_PAUSED && SpotifyListenerService.notifIntent != null)
             )
-            val playing = forcePlaying ?: (state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING)
+            val playing = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
+
+            val now = SystemClock.elapsedRealtime()
+            if (pendingPlaying != null && (playing == pendingPlaying || now >= pendingUntil)) {
+                pendingPlaying = null
+            }
+            val effectivePlaying = pendingPlaying ?: playing
 
             val views = RemoteViews(ctx.packageName, R.layout.widget)
             val prefs = ctx.getSharedPreferences("state", Context.MODE_PRIVATE)
@@ -125,7 +155,7 @@ object WidgetRenderer {
             val progress = if (duration > 0) (pos * 1000 / duration).toInt() else 0
             views.setProgressBar(R.id.progress, 1000, progress, false)
 
-            views.setCompoundButtonChecked(R.id.playpause, playing)
+            views.setCompoundButtonChecked(R.id.playpause, effectivePlaying)
             val playPausePI = actionPendingIntent(ctx, "com.burak.spotiwidget.PLAYPAUSE", 2)
             views.setOnCheckedChangeResponse(R.id.playpause, RemoteViews.RemoteResponse.fromPendingIntent(playPausePI))
 
@@ -144,10 +174,7 @@ object WidgetRenderer {
 
             for (id in ids) {
                 val opts = mgr.getAppWidgetOptions(id)
-                val heightDp = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
-                    .takeIf { it > 0 }
-                    ?: opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0).takeIf { it > 0 }
-                    ?: 72
+                val heightDp = portraitHeightDp(opts)
                 val perId = RemoteViews(views)
                 perId.setViewLayoutWidth(R.id.art, heightDp.toFloat(), TypedValue.COMPLEX_UNIT_DIP)
                 mgr.updateAppWidget(id, perId)

@@ -15,7 +15,8 @@
             android:id="@+id/art"
             android:layout_width="80dp"
             android:layout_height="match_parent"
-            android:scaleType="centerCrop"
+            android:background="#E6121212"
+            android:scaleType="fitCenter"
             android:src="@drawable/ic_music_note" />
 
         <FrameLayout

@@ -38,13 +38,8 @@ class WidgetProvider : AppWidgetProvider() {
                         } else {
                             !currentlyPlaying
                         }
-                        if (wantPlay) {
-                            c.transportControls.play()
-                            WidgetRenderer.update(context, true)
-                        } else {
-                            c.transportControls.pause()
-                            WidgetRenderer.update(context, false)
-                        }
+                        WidgetRenderer.setPendingPlaying(context, wantPlay)
+                        if (wantPlay) c.transportControls.play() else c.transportControls.pause()
                     } else {
                         sendMediaKey(context, KeyEvent.KEYCODE_MEDIA_PLAY)
                     }
