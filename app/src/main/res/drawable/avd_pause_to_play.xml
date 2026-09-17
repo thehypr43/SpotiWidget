@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/pause">
+    <target android:name="left" android:animation="@animator/left_pause_to_play" />
+    <target android:name="right" android:animation="@animator/right_pause_to_play" />
+</animated-vector>

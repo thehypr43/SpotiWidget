@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SpotiWidget</string>
+    <string name="widget_desc">Spotify controls</string>
+    <string name="a11y_desc">Widget\'taki şarkı çubuğunu parmakla kaydırabilmek için gerekli. Hiçbir veri okumaz/göndermez.</string>
+</resources>
