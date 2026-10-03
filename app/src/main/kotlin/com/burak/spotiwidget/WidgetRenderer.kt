@@ -5,7 +5,6 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadata
@@ -45,16 +44,9 @@ object WidgetRenderer {
         update(ctx)
     }
 
-    // idle art cache: loaded from disk once, invalidated by SpotifyListenerService when ctx changes.
-    private var idleCtxLoaded = false
-    private var idleCtxArt: Bitmap? = null
+    // idle art cache: loaded from disk once.
     private var idleLastLoaded = false
     private var idleLastArt: Bitmap? = null
-
-    fun invalidateIdleArt() {
-        idleCtxLoaded = false
-        idleCtxArt = null
-    }
 
     fun position(c: MediaController): Long {
         val state = c.playbackState ?: return 0L
@@ -100,7 +92,7 @@ object WidgetRenderer {
             val trackMode = c != null && meta != null && (
                 state == PlaybackState.STATE_PLAYING ||
                 state == PlaybackState.STATE_BUFFERING ||
-                (state == PlaybackState.STATE_PAUSED && SpotifyListenerService.notifIntent != null)
+                (state == PlaybackState.STATE_PAUSED && SpotifyListenerService.notifPresent)
             )
             val playing = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
 
@@ -113,7 +105,7 @@ object WidgetRenderer {
             val views = RemoteViews(ctx.packageName, R.layout.widget)
             val prefs = ctx.getSharedPreferences("state", Context.MODE_PRIVATE)
 
-            val contentIntent: PendingIntent
+            val contentIntent = launchSpotifyIntent(ctx)
 
             if (trackMode) {
                 val title = meta!!.getString(MediaMetadata.METADATA_KEY_TITLE) ?: ""
@@ -126,24 +118,12 @@ object WidgetRenderer {
 
                 val art = trackArt(ctx, meta)
                 if (art != null) views.setImageViewBitmap(R.id.art, art) else views.setImageViewResource(R.id.art, R.drawable.ic_music_note)
-
-                contentIntent = SpotifyListenerService.notifIntent ?: c!!.sessionActivity ?: launchSpotifyIntent(ctx)
             } else {
-                val ctxName = prefs.getString("ctx_name", null)
-                val name = ctxName ?: prefs.getString("last_title", null) ?: "Spotify"
-                val subtitle = if (ctxName != null) "Son çalınan liste" else (prefs.getString("last_artist", null) ?: "")
-                views.setTextViewText(R.id.title, name)
-                views.setTextViewText(R.id.subtitle, subtitle)
+                views.setTextViewText(R.id.title, prefs.getString("last_title", null) ?: "Spotify")
+                views.setTextViewText(R.id.subtitle, prefs.getString("last_artist", null) ?: "")
 
-                val idleArt = idleArt(ctx, prefs)
+                val idleArt = idleArt(ctx)
                 if (idleArt != null) views.setImageViewBitmap(R.id.art, idleArt) else views.setImageViewResource(R.id.art, R.drawable.ic_music_note)
-
-                val uri = prefs.getString("ctx_uri", null) ?: "spotify:collection"
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
-                    setPackage("com.spotify.music")
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                contentIntent = PendingIntent.getActivity(ctx, 200, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             }
 
             views.setOnClickPendingIntent(R.id.title, contentIntent)
@@ -313,13 +293,7 @@ object WidgetRenderer {
         }
     }
 
-    private fun idleArt(ctx: Context, prefs: SharedPreferences): Bitmap? {
-        if (!idleCtxLoaded) {
-            idleCtxLoaded = true
-            idleCtxArt = loadArtFile(ctx, "ctx_art.png")
-        }
-        if (idleCtxArt != null) return idleCtxArt
-
+    private fun idleArt(ctx: Context): Bitmap? {
         if (!idleLastLoaded) {
             idleLastLoaded = true
             idleLastArt = loadArtFile(ctx, "last_art.png")
@@ -342,7 +316,7 @@ object WidgetRenderer {
 
     private fun launchSpotifyIntent(ctx: Context): PendingIntent {
         val launch = ctx.packageManager.getLaunchIntentForPackage("com.spotify.music")
-            ?: Intent(Intent.ACTION_VIEW, Uri.parse("spotify:")).apply { setPackage("com.spotify.music") }
+            ?: Intent(Intent.ACTION_MAIN).setPackage("com.spotify.music").addCategory(Intent.CATEGORY_LAUNCHER)
         launch.flags = Intent.FLAG_ACTIVITY_NEW_TASK
         return PendingIntent.getActivity(ctx, 200, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }

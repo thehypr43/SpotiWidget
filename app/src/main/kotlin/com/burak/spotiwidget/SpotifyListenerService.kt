@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
@@ -15,36 +14,22 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
-import android.net.Uri
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.service.notification.NotificationListenerService
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 
 class SpotifyListenerService : NotificationListenerService() {
 
     companion object {
         @Volatile var controller: MediaController? = null
-        // Spotify's own notification tap target: opens the now-playing screen.
-        @Volatile var notifIntent: android.app.PendingIntent? = null
+        // True while Spotify's notification is showing.
+        @Volatile var notifPresent: Boolean = false
         // Spotify's notification large icon art, only trusted when it matches the current track title.
         @Volatile var notifArt: Bitmap? = null
         @Volatile var notifArtTitle: String? = null
-        // Raw extras of Spotify's last notification, for context candidates and MainActivity diagnostics.
-        @Volatile var notifExtras: Bundle? = null
-
         private const val SPOTIFY_PKG = "com.spotify.music"
-        private val COLLECTION_RE = Regex("spotify:(user:[^:\\s]+:)?collection")
-        private val TYPED_URI_RE = Regex("spotify:(?:user:[^:\\s]+:)?(playlist|album|artist|show):([A-Za-z0-9]+)")
-        private val NOTIF_TEXT_KEYS = listOf(
-            Notification.EXTRA_TITLE, Notification.EXTRA_TEXT, Notification.EXTRA_SUB_TEXT,
-            Notification.EXTRA_INFO_TEXT, Notification.EXTRA_SUMMARY_TEXT
-        )
     }
 
     private lateinit var msm: MediaSessionManager
@@ -83,7 +68,7 @@ class SpotifyListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        try { activeNotifications?.firstOrNull { it.packageName == SPOTIFY_PKG && it.notification.contentIntent != null }?.let { notifIntent = it.notification.contentIntent } } catch (_: Exception) {}
+        try { notifPresent = activeNotifications?.any { it.packageName == SPOTIFY_PKG } == true } catch (_: Exception) {}
         msm = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
         cn = ComponentName(this, SpotifyListenerService::class.java)
         try {
@@ -105,10 +90,8 @@ class SpotifyListenerService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification) {
         if (sbn.packageName != SPOTIFY_PKG) return
-        var changed = false
-
-        sbn.notification.contentIntent?.let { if (it != notifIntent) { notifIntent = it; changed = true } }
-        notifExtras = sbn.notification.extras
+        var changed = !notifPresent
+        notifPresent = true
 
         val title = sbn.notification.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
         try {
@@ -125,7 +108,7 @@ class SpotifyListenerService : NotificationListenerService() {
     }
 
     override fun onNotificationRemoved(sbn: android.service.notification.StatusBarNotification) {
-        if (sbn.packageName == SPOTIFY_PKG) notifIntent = null
+        if (sbn.packageName == SPOTIFY_PKG) notifPresent = false
     }
 
     override fun onListenerDisconnected() {
@@ -150,7 +133,7 @@ class SpotifyListenerService : NotificationListenerService() {
     }
 
     private fun onChange() {
-        captureContext()
+        saveLast()
         WidgetRenderer.update(this)
         val state = controller?.playbackState?.state
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -166,7 +149,7 @@ class SpotifyListenerService : NotificationListenerService() {
         mainHandler.removeCallbacks(ticker)
     }
 
-    private fun captureContext() {
+    private fun saveLast() {
         val c = controller ?: return
         val meta = c.metadata ?: return
 
@@ -177,59 +160,6 @@ class SpotifyListenerService : NotificationListenerService() {
             prefs.edit().putString("last_title", title).putString("last_artist", artist).apply()
         }
 
-        val candidates = mutableListOf<String>()
-        for (key in meta.keySet()) {
-            try {
-                meta.getString(key)?.let { candidates.add(it) }
-            } catch (_: Exception) {
-            }
-        }
-        collectBundleStrings(c.extras, candidates)
-        collectBundleStrings(c.playbackState?.extras, candidates)
-
-        try {
-            c.queue?.take(3)?.forEach { item ->
-                val d = item.description
-                d.mediaId?.let { candidates.add(it) }
-                d.title?.toString()?.let { candidates.add(it) }
-                d.subtitle?.toString()?.let { candidates.add(it) }
-                collectBundleStrings(d.extras, candidates)
-            }
-        } catch (_: Exception) {
-        }
-
-        notifExtras?.let { extras ->
-            for (key in NOTIF_TEXT_KEYS) {
-                try {
-                    extras.getCharSequence(key)?.toString()?.let { candidates.add(it) }
-                } catch (_: Exception) {
-                }
-            }
-        }
-
-        // Playlist wins over album: track metadata may carry its own album URI.
-        val all = candidates.joinToString(" ")
-        val uri = listOf(
-            "spotify:(user:[^:\\s]+:)?playlist:[A-Za-z0-9]+",
-            "spotify:(show|artist):[A-Za-z0-9]+",
-            "spotify:(user:[^:\\s]+:)?collection",
-            "spotify:album:[A-Za-z0-9]+"
-        ).firstNotNullOfOrNull { Regex(it).find(all)?.value }
-
-        if (uri != null && prefs.getString("ctx_uri", null) != uri) {
-            prefs.edit().putString("ctx_uri", uri).apply()
-            resolveContext(uri)
-        }
-    }
-
-    private fun collectBundleStrings(b: Bundle?, out: MutableList<String>) {
-        if (b == null) return
-        for (key in b.keySet()) {
-            try {
-                (b.get(key) as? String)?.let { out.add(it) }
-            } catch (_: Exception) {
-            }
-        }
     }
 
     private fun drawableToBitmap(d: Drawable): Bitmap {
@@ -241,61 +171,5 @@ class SpotifyListenerService : NotificationListenerService() {
         d.setBounds(0, 0, canvas.width, canvas.height)
         d.draw(canvas)
         return bmp
-    }
-
-    private fun resolveContext(uri: String) {
-        Thread {
-            try {
-                val prefs = getSharedPreferences("state", Context.MODE_PRIVATE)
-                if (COLLECTION_RE.matches(uri)) {
-                    prefs.edit().putString("ctx_name", "Beğenilen Şarkılar").apply()
-                    deleteFile("ctx_art.png")
-                } else {
-                    val m = TYPED_URI_RE.find(uri) ?: return@Thread
-                    val path = "${m.groupValues[1]}/${m.groupValues[2]}"
-                    val url = "https://open.spotify.com/oembed?url=" + Uri.encode("https://open.spotify.com/$path")
-                    val json = httpGet(url) ?: return@Thread
-                    val obj = JSONObject(json)
-
-                    if (obj.has("title")) {
-                        prefs.edit().putString("ctx_name", obj.getString("title")).apply()
-                    }
-                    if (obj.has("thumbnail_url")) {
-                        val raw = downloadBitmap(obj.getString("thumbnail_url"))
-                        if (raw != null) {
-                            val scaled = WidgetRenderer.scaleArtMax(raw)
-                            openFileOutput("ctx_art.png", Context.MODE_PRIVATE).use {
-                                scaled.compress(Bitmap.CompressFormat.PNG, 100, it)
-                            }
-                        }
-                    }
-                }
-                WidgetRenderer.invalidateIdleArt()
-                mainHandler.post { WidgetRenderer.update(this) }
-            } catch (_: Exception) {
-            }
-        }.start()
-    }
-
-    private fun httpGet(urlStr: String): String? {
-        val conn = URL(urlStr).openConnection() as HttpURLConnection
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
-        return try {
-            conn.inputStream.bufferedReader().use { it.readText() }
-        } finally {
-            conn.disconnect()
-        }
-    }
-
-    private fun downloadBitmap(urlStr: String): Bitmap? {
-        val conn = URL(urlStr).openConnection() as HttpURLConnection
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
-        return try {
-            conn.inputStream.use { BitmapFactory.decodeStream(it) }
-        } finally {
-            conn.disconnect()
-        }
     }
 }

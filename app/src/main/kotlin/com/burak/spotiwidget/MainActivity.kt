@@ -82,8 +82,6 @@ class MainActivity : Activity() {
 
     private fun buildDiagnostics(): String = buildString {
         val prefs = getSharedPreferences("state", MODE_PRIVATE)
-        append("ctx_uri=").append(prefs.getString("ctx_uri", "null")).append('\n')
-        append("ctx_name=").append(prefs.getString("ctx_name", "null")).append('\n')
         append("last_title=").append(prefs.getString("last_title", "null")).append('\n')
         append("last_artist=").append(prefs.getString("last_artist", "null")).append('\n')
 
@@ -92,53 +90,14 @@ class MainActivity : Activity() {
             append("controller=null\n")
             return@buildString
         }
-        append("queueTitle=").append(c.queueTitle ?: "null").append('\n')
-
-        val meta = c.metadata
-        if (meta != null) {
-            append("--- metadata ---\n")
-            for (key in meta.keySet()) {
-                val s = try { meta.getString(key) } catch (_: Exception) { null }
-                if (s != null) {
-                    append(key).append('=').append(s).append('\n')
-                } else {
-                    val bmp = try { meta.getBitmap(key) } catch (_: Exception) { null }
-                    if (bmp != null) append(key).append("=bitmap\n")
-                }
-            }
-        }
-
-        append("--- controller.extras ---\n")
-        c.extras?.let { b -> for (key in b.keySet()) append(key).append('=').append(safeGet(b, key)).append('\n') }
-        append("--- playbackState.extras ---\n")
-        c.playbackState?.extras?.let { b -> for (key in b.keySet()) append(key).append('=').append(safeGet(b, key)).append('\n') }
-
-        append("--- queue (first 3) ---\n")
-        try {
-            c.queue?.take(3)?.forEachIndexed { i, item ->
-                val d = item.description
-                append(i).append(": mediaId=").append(d.mediaId).append(" title=").append(d.title)
-                    .append(" subtitle=").append(d.subtitle).append('\n')
-                d.extras?.let { b -> for (key in b.keySet()) append("  ").append(key).append('=').append(safeGet(b, key)).append('\n') }
-            }
-        } catch (_: Exception) {
-        }
+        append("state=").append(c.playbackState?.state ?: "null").append('\n')
 
         append("--- custom actions ---\n")
         c.playbackState?.customActions?.forEach { a ->
             append(a.action).append(" | ").append(a.name).append('\n')
         }
 
-        append("--- spotify notification extras ---\n")
-        SpotifyListenerService.notifExtras?.let { b ->
-            for (key in b.keySet()) {
-                val v = try { b.get(key) } catch (_: Exception) { null }
-                if (v is String || v is CharSequence) append(key).append('=').append(v).append('\n')
-            }
-        }
     }
-
-    private fun safeGet(b: Bundle, key: String): Any? = try { b.get(key) } catch (_: Exception) { null }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 }
