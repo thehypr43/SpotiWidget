@@ -2,5 +2,24 @@
 <resources>
     <string name="app_name">SpotiWidget</string>
     <string name="widget_desc">Spotify controls</string>
-    <string name="a11y_desc">Widget\'taki şarkı çubuğunu parmakla kaydırabilmek için gerekli. Hiçbir veri okumaz/göndermez.</string>
+    <string name="app_tagline">Ana ekranında Spotify kontrolü</string>
+    <string name="label_now_playing">ŞU AN ÇALIYOR</string>
+    <string name="label_last_played">SON ÇALAN</string>
+    <string name="nothing_played">Henüz bir şey çalmadı</string>
+    <string name="nothing_played_sub">Spotify\'da bir şarkı aç, burada görünsün</string>
+    <string name="section_setup">KURULUM</string>
+    <string name="notif_title">Bildirim erişimi</string>
+    <string name="notif_desc">Çalan şarkıyı, kapağı ve ilerlemeyi okuyabilmek için gerekli. Hiçbir veri dışarı gönderilmez.</string>
+    <string name="notif_hint">Anahtar gri/pasifse: Ayarlar > Uygulamalar > SpotiWidget > sağ üst ⋮ > \"Kısıtlanmış ayarlara izin ver\".</string>
+    <string name="notif_grant">Erişimi aç</string>
+    <string name="notif_settings">Ayarları aç</string>
+    <string name="widget_title">Widget</string>
+    <string name="widget_setup_desc">Kapak, şarkı adı, kontroller ve ilerleme çubuğu olan 4×1 widget\'ı ana ekranına ekle.</string>
+    <string name="widget_add">Ana ekrana ekle</string>
+    <string name="widget_add_more">Bir tane daha ekle</string>
+    <string name="widget_add_manual">Ana ekrana uzun bas > Widget\'lar > SpotiWidget</string>
+    <string name="chip_on">Açık</string>
+    <string name="chip_off">Kapalı</string>
+    <string name="chip_added">Eklendi</string>
+    <string name="chip_not_added">Eklenmedi</string>
 </resources>

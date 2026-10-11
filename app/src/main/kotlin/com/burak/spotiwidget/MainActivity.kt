@@ -1,103 +1,142 @@
 package com.burak.spotiwidget
 
 import android.app.Activity
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Intent
-import android.graphics.Typeface
+import android.media.MediaMetadata
+import android.media.session.PlaybackState
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.View
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
+import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private lateinit var statusText: TextView
-    private lateinit var a11yStatusText: TextView
-    private lateinit var diagText: TextView
+    private lateinit var nowLabel: TextView
+    private lateinit var nowArt: ImageView
+    private lateinit var nowTitle: TextView
+    private lateinit var nowArtist: TextView
+    private lateinit var nowProgress: ProgressBar
+    private lateinit var notifChip: TextView
+    private lateinit var notifHint: TextView
+    private lateinit var notifButton: TextView
+    private lateinit var widgetChip: TextView
+    private lateinit var widgetButton: TextView
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val ticker = object : Runnable {
+        override fun run() {
+            bindNowPlaying()
+            handler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
 
-        val pad = dp(24)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, pad, pad, pad)
-        }
-        statusText = TextView(this).apply { textSize = 14f }
-        val button = Button(this).apply {
-            text = "Bildirim erişimini aç"
-            setOnClickListener { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-        }
-        a11yStatusText = TextView(this).apply { textSize = 14f }
-        val a11yButton = Button(this).apply {
-            text = "Kaydırmalı slider için Erişilebilirlik'i aç"
-            setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-        }
-        val diagLabel = TextView(this).apply {
-            text = "Tanı"
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-        }
-        diagText = TextView(this).apply {
-            textSize = 11f
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
-        }
+        nowLabel = findViewById(R.id.nowLabel)
+        nowArt = findViewById(R.id.nowArt)
+        nowTitle = findViewById(R.id.nowTitle)
+        nowArtist = findViewById(R.id.nowArtist)
+        nowProgress = findViewById(R.id.nowProgress)
+        notifChip = findViewById(R.id.notifChip)
+        notifHint = findViewById(R.id.notifHint)
+        notifButton = findViewById(R.id.notifButton)
+        widgetChip = findViewById(R.id.widgetChip)
+        widgetButton = findViewById(R.id.widgetButton)
 
-        root.addView(statusText)
-        root.addView(View(this), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(16)))
-        root.addView(button)
-        root.addView(View(this), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(24)))
-        root.addView(a11yStatusText)
-        root.addView(View(this), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(16)))
-        root.addView(a11yButton)
-        root.addView(View(this), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(24)))
-        root.addView(diagLabel)
-        root.addView(diagText)
-
-        setContentView(ScrollView(this).apply { addView(root) })
+        findViewById<View>(R.id.nowCard).setOnClickListener {
+            packageManager.getLaunchIntentForPackage("com.spotify.music")?.let { startActivity(it) }
+        }
+        notifButton.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+        widgetButton.setOnClickListener { pinWidget() }
     }
 
     override fun onResume() {
         super.onResume()
-        val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: ""
-        val granted = enabled.contains(packageName)
-        statusText.text = buildString {
-            append(if (granted) "Bildirim erişimi: VAR" else "Bildirim erişimi: YOK")
-            append("\n\n1) Aşağıdaki butondan SpotiWidget için bildirim erişimini açın.")
-            append("\n2) Ana ekrana dönüp widget'ı ekleyin (uzun bas > Widget'lar > SpotiWidget).")
-            append("\n\nAndroid 13+ : anahtar gri/pasifse Ayarlar > Uygulamalar > SpotiWidget > sağ üst ⋮ > \"Kısıtlanmış ayarlara izin ver\".")
-        }
-        val a11yServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: ""
-        val a11yGranted = a11yServices.contains("$packageName/")
-        a11yStatusText.text = buildString {
-            append(if (a11yGranted) "Kaydırmalı slider (Erişilebilirlik): VAR" else "Kaydırmalı slider (Erişilebilirlik): YOK")
-            append("\n\nWidget'taki şarkı çubuğunu parmakla kaydırabilmek için gerekli. Dokunma ile atlamayı önler.")
-            append("\n\nAndroid 13+ : anahtar gri/pasifse Ayarlar > Uygulamalar > SpotiWidget > sağ üst ⋮ > \"Kısıtlanmış ayarlara izin ver\", sonra tekrar deneyin.")
-        }
-        diagText.text = buildDiagnostics()
+        bindSetup()
+        handler.post(ticker)
     }
 
-    private fun buildDiagnostics(): String = buildString {
-        val prefs = getSharedPreferences("state", MODE_PRIVATE)
-        append("last_title=").append(prefs.getString("last_title", "null")).append('\n')
-        append("last_artist=").append(prefs.getString("last_artist", "null")).append('\n')
+    override fun onPause() {
+        handler.removeCallbacks(ticker)
+        super.onPause()
+    }
 
+    private fun bindNowPlaying() {
         val c = SpotifyListenerService.controller
-        if (c == null) {
-            append("controller=null\n")
-            return@buildString
-        }
-        append("state=").append(c.playbackState?.state ?: "null").append('\n')
+        val meta = c?.metadata
+        val state = c?.playbackState?.state
+        val playing = state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING
+        val prefs = getSharedPreferences("state", MODE_PRIVATE)
 
-        append("--- custom actions ---\n")
-        c.playbackState?.customActions?.forEach { a ->
-            append(a.action).append(" | ").append(a.name).append('\n')
+        val title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE)?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("last_title", null)
+        val artist = meta?.getString(MediaMetadata.METADATA_KEY_ARTIST)?.takeIf { it.isNotBlank() }
+            ?: prefs.getString("last_artist", null)
+
+        nowLabel.setText(if (playing) R.string.label_now_playing else R.string.label_last_played)
+        nowLabel.setTextColor(getColor(if (playing) R.color.green else R.color.text_faint))
+        if (title != null) {
+            nowTitle.text = title
+            nowArtist.text = artist ?: ""
+        } else {
+            nowTitle.setText(R.string.nothing_played)
+            nowArtist.setText(R.string.nothing_played_sub)
         }
 
+        val art = if (title != null) WidgetRenderer.currentArt(this) ?: SpotifyListenerService.notifArt else null
+        if (art != null) {
+            nowArt.scaleType = ImageView.ScaleType.CENTER_CROP
+            nowArt.setImageBitmap(art)
+        } else {
+            nowArt.scaleType = ImageView.ScaleType.CENTER
+            nowArt.setImageResource(R.drawable.ic_music_note)
+        }
+
+        val duration = meta?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        nowProgress.progress = if (c != null && duration > 0) (WidgetRenderer.position(c) * 1000 / duration).toInt() else 0
     }
 
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun bindSetup() {
+        val listeners = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: ""
+        val granted = listeners.contains(packageName)
+        setChip(notifChip, granted, R.string.chip_on, R.string.chip_off)
+        notifHint.visibility = if (granted) View.GONE else View.VISIBLE
+        setButton(notifButton, primary = !granted, if (granted) R.string.notif_settings else R.string.notif_grant)
+
+        val widgetIds = AppWidgetManager.getInstance(this)
+            .getAppWidgetIds(ComponentName(this, WidgetProvider::class.java))
+        val added = widgetIds.isNotEmpty()
+        setChip(widgetChip, added, R.string.chip_added, R.string.chip_not_added)
+        setButton(widgetButton, primary = !added, if (added) R.string.widget_add_more else R.string.widget_add)
+    }
+
+    private fun setChip(chip: TextView, on: Boolean, onText: Int, offText: Int) {
+        chip.setText(if (on) onText else offText)
+        chip.setTextColor(getColor(if (on) R.color.green else R.color.warn))
+        chip.setBackgroundResource(if (on) R.drawable.chip_on else R.drawable.chip_off)
+    }
+
+    private fun setButton(button: TextView, primary: Boolean, text: Int) {
+        button.setText(text)
+        button.setTextColor(if (primary) 0xFF000000.toInt() else getColor(R.color.text))
+        button.setBackgroundResource(if (primary) R.drawable.btn_primary else R.drawable.btn_secondary)
+    }
+
+    private fun pinWidget() {
+        val mgr = AppWidgetManager.getInstance(this)
+        val provider = ComponentName(this, WidgetProvider::class.java)
+        val requested = mgr.isRequestPinAppWidgetSupported && mgr.requestPinAppWidget(provider, null, null)
+        if (!requested) Toast.makeText(this, R.string.widget_add_manual, Toast.LENGTH_LONG).show()
+    }
 }

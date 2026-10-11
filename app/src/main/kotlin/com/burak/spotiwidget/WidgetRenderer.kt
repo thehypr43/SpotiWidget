@@ -200,19 +200,6 @@ object WidgetRenderer {
         }
     }
 
-    /** Immediate optimistic progress update to [fraction] (0..1) right after a seek drag, before the real position ticks in. */
-    fun setProgressFraction(ctx: Context, fraction: Double) {
-        try {
-            val mgr = AppWidgetManager.getInstance(ctx)
-            val ids = mgr.getAppWidgetIds(ComponentName(ctx, WidgetProvider::class.java))
-            if (ids.isEmpty()) return
-            val views = RemoteViews(ctx.packageName, R.layout.widget)
-            views.setProgressBar(R.id.progress, 1000, (fraction * 1000).toInt().coerceIn(0, 1000), false)
-            mgr.partiallyUpdateAppWidget(ids, views)
-        } catch (_: Exception) {
-        }
-    }
-
     /**
      * Resolves art for the current track. Cache key is the media id (or title); only a non-null
      * bitmap is ever cached, so a miss is retried on every call instead of sticking forever.
@@ -292,6 +279,9 @@ object WidgetRenderer {
         } catch (_: Exception) {
         }
     }
+
+    /** Art of the current track if resolved, otherwise the last one persisted to disk. */
+    fun currentArt(ctx: Context): Bitmap? = cachedTrackArt ?: idleArt(ctx)
 
     private fun idleArt(ctx: Context): Bitmap? {
         if (!idleLastLoaded) {
